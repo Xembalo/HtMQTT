@@ -10,6 +10,7 @@ import re
 import csv
 import os
 
+from logging.handlers import TimedRotatingFileHandler
 from htheatpump.htheatpump import HtHeatpump
 from htheatpump.htparams import HtDataTypes, HtParams
 from htheatpump.utils import Timer
@@ -215,9 +216,14 @@ def parseArguments():
 def main():
     global HADEVICE
     
-
+    # Logger erstellen
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    handler = TimedRotatingFileHandler("htmqtt.log", when="midnight", interval=1, backupCount=7, encoding="utf-8")
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
     
-    logging.basicConfig(filename='htmqtt.log', encoding='utf-8', level=logging.DEBUG, format='%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     logging.info('Script started')
 
     parseArguments()
