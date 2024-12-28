@@ -42,19 +42,85 @@ def writeCSV(data: dict) -> None:
         w.writerow(data)   
 
 #Read general information
-def readDeviceInfo(hp: HtHeatpump):
-    global HADEVICE
+def readDeviceInfo() -> HADevice:
+    hp = HtHeatpump(HP_DEVICE, baudrate=HP_BAUD)
+    try:
+        hp.open_connection()
+        hp.login()
 
-    version = hp.get_version()
-    sn = str(hp.get_serial_number())
+        version = hp.get_version()
+        sn = str(hp.get_serial_number())
 
-    HADEVICE = HADevice(
-        manufacturer="Heliotherm", 
-        model="Basic Comfort",
-        name="Heliotherm Heat Pump",
-        sw_version=version[0],
-        identifiers=[sn]
-    )
+        device = HADevice(
+            manufacturer="Heliotherm", 
+            model="Basic Comfort",
+            name="Heliotherm Heat Pump",
+            sw_version=version[0],
+            identifiers=[sn]
+        )
+
+    except Exception as ex:
+        device = HADevice(
+            manufacturer="Heliotherm", 
+            model="Basic Comfort",
+            name="Heliotherm Heat Pump"
+        )
+
+    finally:
+        hp.logout()  # try to logout for an ordinary cancellation (if possible)
+        hp.close_connection()
+
+    return device
+
+def modifyStats(data: dict) -> dict:
+    norm_values = {}
+    for name, val in data.items():
+        
+        #normalize key
+        new_key = re.sub(r'[^A-Za-z]', '', name).lower()
+
+
+        new_val = val
+
+        if new_key == "betriebsart":
+            match new_val:
+                case 0:
+                    new_val = "Aus"
+                case 1:
+                    new_val = "Auto"
+                case 2:
+                    new_val = "Kühlen"
+                case 3:
+                    new_val = "Sommer"
+                case 4:
+                    new_val = "Dauerbetrieb"
+                case 5:
+                    new_val = "Absenken"
+                case 6:
+                    new_val = "Urlaub"
+                case 7:
+                    new_val = "Party"
+                case _:
+                    new_val = None
+
+        #if it is boolean convert to string
+        if isinstance(new_val, bool):
+            if new_val:
+                new_val = "ON"
+            else:
+                new_val = "OFF"
+
+        #if it is a number and smaller then -50, then kill data
+        try:
+            new_val = float(new_val)
+            if new_val <= -50.:
+                new_val = None
+        except ValueError:
+            pass
+        
+        norm_values[new_key] = new_val
+
+    return norm_values
 
 
 #Read contents 
@@ -65,11 +131,7 @@ def readStats() -> dict:
         hp.login()
 
         values = hp.query()
-        norm_values = {}
-        for name, val in values.items():
-            norm_values[re.sub(r'[^A-Za-z]', '', name).lower()] = val
-
-        return norm_values
+        return modifyStats(values)
 
     except Exception as ex:
         logging.exception(ex)
@@ -130,7 +192,7 @@ def parseArguments():
 
     group = parser.add_argument_group('MQTT')  
     group.add_argument("-i", "--mqtt_client_identifier", help="MQTT client identifier", metavar='identifier')
-    group.add_argument("-t", "--mqtt_topic",             help="Topic for stats, like demand, feed-in or battery level", metavar='topic')
+    group.add_argument("-t", "--mqtt_topic",             help="Topic for stats", metavar='topic')
     group.add_argument("-x", "--mqtt_host",              help="Host or IP of your mqtt broker (e.g. localhost)", metavar='host/ip')
     group.add_argument("-p", "--mqtt_port",              type=int, default=1883, help="port of your mqtt broker (default: %(default)s)", metavar='port')
     group.add_argument("-u", "--mqtt_user",              help="Username for your mqtt broker", metavar='username')
@@ -151,6 +213,10 @@ def parseArguments():
 
 
 def main():
+    global HADEVICE
+    
+
+    
     logging.basicConfig(filename='htmqtt.log', encoding='utf-8', level=logging.DEBUG, format='%(asctime)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     logging.info('Script started')
 
@@ -170,25 +236,7 @@ def main():
 
     client.will_set(MQTT_TOPIC + "/state","offline",MQTT_QOS,retain=True)
 
-    hp = HtHeatpump(HP_DEVICE, baudrate=HP_BAUD)
-    try:
-        print("try open")
-
-        hp.open_connection()
-        print("try login")
-        hp.login()
-
-        #read device info
-        print("read")
-        readDeviceInfo(hp)
-        print(HADEVICE)
-
-
-    except Exception as ex:
-        None
-    finally:
-        hp.logout()  # try to logout for an ordinary cancellation (if possible)
-        hp.close_connection()
+    HADEVICE = readDeviceInfo()
 
     try:
         logging.info("try to connect")
@@ -206,10 +254,9 @@ def main():
         if client.connected_flag: 
             data = readStats()
             pushMqttStats(client, data)
-            writeCSV(data)
         
-        #wait another 30 seconds
-        time.sleep(30.0 - time.time() % 30.0)
+        #wait 60 seconds
+        time.sleep(60.0 - time.time() % 60.0)
 
     #send last message
     client.publish(MQTT_TOPIC + "/state", "offline", qos=MQTT_QOS, retain=True)
@@ -218,4 +265,3 @@ def main():
 
 if __name__ == "__main__":
    main()
-
