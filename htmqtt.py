@@ -7,8 +7,6 @@ import signal
 import logging
 import json
 import re
-import csv
-import os
 
 from logging.handlers import TimedRotatingFileHandler
 from htheatpump.htheatpump import HtHeatpump
@@ -32,15 +30,6 @@ MQTT_QOS = 0
 MQTT_USER = ""
 MQTT_PASS = ""
 HADEVICE = None
-
-def writeCSV(data: dict) -> None:
-    with open('values.csv', 'a') as f:
-        w = csv.DictWriter(f,fieldnames=data.keys(), dialect='excel', delimiter=';')
-        
-        if os.path.getsize('values.csv') == 0:
-            w.writeheader()
-
-        w.writerow(data)   
 
 #Read general information
 def readDeviceInfo() -> HADevice:
