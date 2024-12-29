@@ -46,6 +46,7 @@ def writeCSV(data: dict) -> None:
 def readDeviceInfo() -> HADevice:
     hp = HtHeatpump(HP_DEVICE, baudrate=HP_BAUD)
     try:
+        
         hp.open_connection()
         hp.login()
 
@@ -126,6 +127,7 @@ def modifyStats(data: dict) -> dict:
 
 #Read contents 
 def readStats() -> dict:
+    
     hp = HtHeatpump(HP_DEVICE, baudrate=HP_BAUD)
     try:
         hp.open_connection()
@@ -155,22 +157,32 @@ def pushMqttConfig(mqttclient: mqtt.Client, device: HADevice) -> None:
 def pushMqttStats(mqttclient, mydata: dict):  
     mqttclient.publish(MQTT_TOPIC + "/values", json.dumps(mydata), qos=MQTT_QOS)
 
-def mqttOnConnect(client, userdata, flags, rc):
-    if rc==0:
-        logging.info('MQTT connected')
+def mqttOnConnect(client, userdata, flags, reason_code, properties):
+    if reason_code == 0:
+        logging.debug('MQTT connected')
         client.connected_flag = True
         pushMqttConfig(client, HADEVICE)
     else:
-        logging.info("Bad connection Returned code=",rc)
+        logging.info("Bad connection Returned code=", reason_code)
     
-def mqttOnDisconnect(client, userdata, rc):
+def mqttOnDisconnect(client, userdata, flags, reason_code, properties):
     logging.info("MQTT disconnected")
     client.connected_flag = False
 
 def signalHandler(signal, frame):
     global loopEnabled
+    logging.debug("Got quit signal")
+    #print to stdout for user
     print("Got quit signal, cleaning up...")
     loopEnabled = False
+
+def configureLogger() -> None:
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    handler = TimedRotatingFileHandler("htmqtt.log", when="midnight", interval=1, backupCount=7, encoding="utf-8")
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
 
 def parseArguments():
     global HP_DEVICE
@@ -186,7 +198,13 @@ def parseArguments():
     parser = argparse.ArgumentParser(
             description="Reads stats from Heliotherm heat pump and push to MQTT", 
             epilog="Report bugs, comments or improvements to https://github.com/Xembalo/htmqtt",
-            usage="%(prog)s [options]")
+            usage="%(prog)s [options]",
+            add_help=False
+            )
+    group = parser.add_argument_group('General')
+    group.add_argument("-h", "--help", action='help', help="show this help message and exit")
+    group.add_argument("-l", "--log_level", type=str, default="info", choices=["debug","info","warning","error","critical"], help="set log level (default: %(default)s)", metavar="level")
+
     group = parser.add_argument_group('Heat pump')
     group.add_argument("-d", "--device", default="/dev/ttyUSB0", type=str, help="serial device connection to heat pump (default: %(default)s)", metavar='device')
     group.add_argument("-b", "--baudrate", default=115200, type=int, choices=[9600, 19200, 38400, 57600, 115200], help="baudrate of serial connection (as configured on the heat pump) (default: %(default)s)", metavar='baud')
@@ -212,19 +230,27 @@ def parseArguments():
     MQTT_PASS                   = args.mqtt_pass
     MQTT_QOS                    = args.mqtt_qos
 
+    level_name = args.log_level.lower()
+    logger = logging.getLogger()
+    if level_name == 'debug':
+        logger.setLevel(logging.DEBUG)
+    elif level_name == 'info':
+        logger.setLevel(logging.INFO)
+    elif level_name == 'warning':
+        logger.setLevel(logging.WARNING)
+    elif level_name == 'error':
+        logger.setLevel(logging.ERROR)
+    elif level_name == 'critical':
+        logger.setLevel(logging.CRITICAL)
+
+    logging.debug("parsed arguments: %s", vars(args))
 
 def main():
     global HADEVICE
     
-    # Logger erstellen
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
-    handler = TimedRotatingFileHandler("htmqtt.log", when="midnight", interval=1, backupCount=7, encoding="utf-8")
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
+    configureLogger()
     
-    logging.info('Script started')
+    logging.info('script started')
 
     parseArguments()
 
@@ -233,7 +259,7 @@ def main():
 
     mqtt.Client.connected_flag = False
 
-    client = mqtt.Client(MQTT_CLIENT_IDENTIFIER)
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, MQTT_CLIENT_IDENTIFIER)
     client.on_connect = mqttOnConnect
     client.on_disconnect = mqttOnDisconnect
 
@@ -245,16 +271,16 @@ def main():
     HADEVICE = readDeviceInfo()
 
     try:
-        logging.info("try to connect")
+        logging.debug("try to connect to mqtt %s:%d", MQTT_BROKER_ADDRESS, MQTT_PORT)
         client.connect(MQTT_BROKER_ADDRESS, MQTT_PORT)
         logging.info("starting the MQTT background loop")  
         client.loop_start()
     except:
         #if connection was not successful, try it in next loop again
-        logging.info("connection was not successful, try it in next loop again")
+        logging.error("connection was not successful, try it in next loop again")
 
     while loopEnabled:
-        logging.info("main loop")
+        logging.debug("main loop")
 
         #push to mqtt and quits connection
         if client.connected_flag: 
@@ -265,9 +291,14 @@ def main():
         time.sleep(60.0 - time.time() % 60.0)
 
     #send last message
+    logging.debug("send offline state to mqtt")
     client.publish(MQTT_TOPIC + "/state", "offline", qos=MQTT_QOS, retain=True)
-    client.loop_stop()  
-    client.disconnect() 
+    client.loop_stop()
+    logging.debug("mqtt loop stopped")
+    client.disconnect()
+    logging.debug("mqtt disconnected")
+
+    logging.info("script finished")
 
 if __name__ == "__main__":
    main()
