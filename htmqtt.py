@@ -13,7 +13,7 @@ from htheatpump.htheatpump import HtHeatpump
 from htheatpump.htparams import HtDataTypes, HtParams
 from htheatpump.utils import Timer
 from datetime import datetime
-
+from pathlib import Path
 from ha_sensors import *
 
 from mqtt_homeassistant_utils import HADevice
@@ -213,7 +213,7 @@ def signalHandler(signal, frame):
 def configureLogger() -> None:
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
-    handler = TimedRotatingFileHandler("htmqtt.log", when="midnight", interval=1, backupCount=7, encoding="utf-8")
+    handler = TimedRotatingFileHandler(Path(__file__).with_suffix(".log"), when="midnight", interval=1, backupCount=7, encoding="utf-8")
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
