@@ -32,6 +32,22 @@ MQTT_USER = ""
 MQTT_PASS = ""
 HADEVICE = None
 
+def configureLogger() -> None:
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    handler = TimedRotatingFileHandler(Path(__file__).with_suffix(".log"), when="midnight", interval=1, backupCount=7, encoding="utf-8")
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+#handle ctrl+c in terminal session
+def signalHandler(signal, frame):
+    global loopEnabled
+    logging.debug("Got quit signal")
+    #print to stdout for user
+    print("Got quit signal, cleaning up...")
+    loopEnabled = False
+
 #Read general information
 def readDeviceInfo() -> HADevice:
     hp = HtHeatpump(HP_DEVICE, baudrate=HP_BAUD)
@@ -202,22 +218,6 @@ def mqttOnConnect(client, userdata, flags, reason_code, properties):
 def mqttOnDisconnect(client, userdata, flags, reason_code, properties):
     logging.info("MQTT disconnected")
     client.connected_flag = False
-
-#handle ctrl+c in terminal session
-def signalHandler(signal, frame):
-    global loopEnabled
-    logging.debug("Got quit signal")
-    #print to stdout for user
-    print("Got quit signal, cleaning up...")
-    loopEnabled = False
-
-def configureLogger() -> None:
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
-    handler = TimedRotatingFileHandler(Path(__file__).with_suffix(".log"), when="midnight", interval=1, backupCount=7, encoding="utf-8")
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
 
 def parseArguments():
     global HP_DEVICE
