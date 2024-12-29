@@ -203,6 +203,7 @@ def mqttOnDisconnect(client, userdata, flags, reason_code, properties):
     logging.info("MQTT disconnected")
     client.connected_flag = False
 
+#handle ctrl+c in terminal session
 def signalHandler(signal, frame):
     global loopEnabled
     logging.debug("Got quit signal")
