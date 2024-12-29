@@ -12,6 +12,7 @@ from logging.handlers import TimedRotatingFileHandler
 from htheatpump.htheatpump import HtHeatpump
 from htheatpump.htparams import HtDataTypes, HtParams
 from htheatpump.utils import Timer
+from datetime import datetime
 
 from ha_sensors import *
 
@@ -53,7 +54,7 @@ def readDeviceInfo() -> HADevice:
     except Exception as ex:
         device = HADevice(
             manufacturer="Heliotherm", 
-            model="Basic Comfort",
+            model="Unknown",
             name="Heliotherm Heat Pump"
         )
 
@@ -112,6 +113,50 @@ def modifyStats(data: dict) -> dict:
         norm_values[new_key] = new_val
 
     return norm_values
+
+def fixInternalClock() -> None:
+    hp = HtHeatpump(HP_DEVICE, baudrate=HP_BAUD)
+    try:
+        
+        hp.open_connection()
+        hp.login()
+
+        #read current time from hp
+        dt, wd = hp.get_date_time()
+        logging.debug("time on pump: %s", dt.isoformat())
+
+        now = datetime.now().replace(microsecond=0)
+        logging.debug("time on host: %s", now.isoformat())
+
+        #check if there is a difference
+        difference = dt - now 
+        if difference.total_seconds() != 0:
+            if difference.total_seconds() < 0:
+                msg = "time on pump is %d minutes and %d seconds behind the host system"
+            else:
+                msg = "time on pump is %d minutes and %d seconds ahead of the host system"
+
+            difference = abs(dt - now)
+            total_seconds = difference.total_seconds()
+            minutes = int(total_seconds // 60)
+            seconds = int(total_seconds % 60)
+
+            logging.warning(msg, minutes, seconds)
+
+            #correct the time on the pump
+
+            dt, wd = hp.set_date_time() #no parameter = now
+            logging.info("setting time on pump to current time on the host system")
+
+        else:
+            logging.info("time on pump equals time on host system")
+
+    except Exception as ex:
+        logging.exception(ex)
+
+    finally:
+        hp.logout()  # try to logout for an ordinary cancellation (if possible)
+        hp.close_connection()
 
 
 #Read contents 
@@ -271,10 +316,15 @@ def main():
     while loopEnabled:
         logging.debug("main loop")
 
-        #push to mqtt and quits connection
+        #push to mqtt
         if client.connected_flag: 
             data = readStats()
             pushMqttStats(client, data)
+
+        #every day at 0 o'clock fix clock on heat pump
+        now = datetime.now()
+        if now.hour == 0 and now.minute == 0:
+            fixInternalClock()
         
         #wait 60 seconds
         time.sleep(60.0 - time.time() % 60.0)
